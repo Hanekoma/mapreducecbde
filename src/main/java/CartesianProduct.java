@@ -292,7 +292,7 @@ public class CartesianProduct extends Configured implements Tool {
                         // we extract the information from the tuple as we packed it in the mapper
                         iTuple=iTableTuple.split("#")[1];
                         iAttributes=iTuple.split(";");
-                        if (iTableTuple.startsWith(internal[0])) {
+                        if (iTableTuple.startsWith(internal[0]) && checkJoin(eAttributes, iAttributes)) {
                             // Create a key for the output
                             outputKey = eAttributes[0]+"_"+iAttributes[0];
                             // Create a tuple for the output table
@@ -313,6 +313,21 @@ public class CartesianProduct extends Configured implements Tool {
                     }
                 }
             }
+        }
+
+        private boolean checkJoin(String[] eAttributes, String[] iAttributes) {
+            String[] colsValsE = eAttributes[1].split(":");
+            String[] colsValsI = iAttributes[1].split(":");
+            for (int i = 0; i < colsValsE.length; i += 2) {
+                if (colsValsE[i].equals("PEPEE")) {
+                    for (int j = 0; j < colsValsI.length; ++j) {
+                        if (colsValsI[j].equals("PEPEI")) {
+                            return colsValsE[i+1].equals(colsValsI[j+1]);
+                        }
+                    }
+                }
+            }
+            return false;
         }
     }
 }
