@@ -180,7 +180,7 @@ public class CartesianProduct extends Configured implements Tool {
 
 
         // To initialize the mapper, we need to provide two Scan objects (ArrayList of two Scan objects) for two input tables, as follows.
-        ArrayList scans = new ArrayList();
+        ArrayList<Scan> scans = new ArrayList<>();
 
         Scan scan1 = new Scan();
         System.out.println("inputTable1: "+inputTable1);
