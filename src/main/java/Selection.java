@@ -1,30 +1,29 @@
 // Standard classes
 
-import java.io.IOException;
-// HBase classes
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
 import org.apache.hadoop.hbase.mapreduce.TableMapper;
 import org.apache.hadoop.hbase.mapreduce.TableReducer;
-import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
-import org.apache.hadoop.hbase.client.Result;
-// Hadoop classes
 import org.apache.hadoop.hbase.util.Bytes;
-import org.apache.hadoop.util.ToolRunner;
-import org.apache.hadoop.conf.Configured;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.util.Tool;
-import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
-import org.apache.hadoop.mapreduce.Reducer.Context;
+import org.apache.hadoop.util.Tool;
+import org.apache.hadoop.util.ToolRunner;
+
+import java.io.IOException;
+
+// HBase classes
+// Hadoop classes
 
 public class Selection extends Configured implements Tool {
 
@@ -166,19 +165,22 @@ public class Selection extends Configured implements Tool {
             String column = context.getConfiguration().getStrings(COLUMN_ATTRIBUTE)[0];
             String rowId = new String(rowMetadata.get(), "US-ASCII");
 
-            String columnValue = new String(values.getValue(family.getBytes(), column.getBytes()));
-            if (value.equals(columnValue)) {
-                StringBuilder tuple = new StringBuilder("");
-                for (KeyValue keyValue : values.raw()) {
-                    tuple
-                            .append(new String(keyValue.getFamily()))
-                            .append(":")
-                            .append(new String(keyValue.getQualifier()))
-                            .append(":")
-                            .append(new String(keyValue.getValue()))
-                            .append(";");
+            byte[] columnValueRaw = values.getValue(family.getBytes(), column.getBytes());
+            if (columnValueRaw != null) {
+                String columnValue = new String(values.getValue(family.getBytes(), column.getBytes()));
+                if (value.equals(columnValue)) {
+                    StringBuilder tuple = new StringBuilder("");
+                    for (KeyValue keyValue : values.raw()) {
+                        tuple
+                                .append(new String(keyValue.getFamily()))
+                                .append(":")
+                                .append(new String(keyValue.getQualifier()))
+                                .append(":")
+                                .append(new String(keyValue.getValue()))
+                                .append(";");
+                    }
+                    context.write(new Text(rowId), new Text(tuple.toString()));
                 }
-                context.write(new Text(rowId), new Text(tuple.toString()));
             }
         }
     }
