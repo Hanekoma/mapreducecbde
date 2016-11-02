@@ -176,10 +176,12 @@ public class Join extends Configured implements Tool {
         String[] externalArg = args[3].split(":");
         String[] internalArg = args[4].split(":");
         // Set the parameters passed as configuration strings for later use
+        String externalColumn = externalArg.length == 1 ? externalArg[0] : externalArg[1];
+        String internalColumn = internalArg.length == 1 ? internalArg[0] : internalArg[1];
         job.getConfiguration().setStrings(EXTERNAL_FAMILY, externalArg[0]);
-        job.getConfiguration().setStrings(EXTERNAL_COLUMN, externalArg[1]);
+        job.getConfiguration().setStrings(EXTERNAL_COLUMN, externalColumn);
         job.getConfiguration().setStrings(INTERNAL_FAMILY, internalArg[0]);
-        job.getConfiguration().setStrings(INTERNAL_COLUMN, internalArg[1]);
+        job.getConfiguration().setStrings(INTERNAL_COLUMN, internalColumn);
         // If we're going to set it to 10 every time, might as well do it here
         job.getConfiguration().setInt("Hash", 10);
         System.out.println("Hash = " + 10);
