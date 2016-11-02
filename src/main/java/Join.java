@@ -1,35 +1,29 @@
 // Standard classes
 
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Vector;
-import java.util.ArrayList;
-
-// HBase classes
-import org.apache.hadoop.hbase.HBaseConfiguration;
-import org.apache.hadoop.hbase.HColumnDescriptor;
-import org.apache.hadoop.hbase.HTableDescriptor;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.conf.Configured;
+import org.apache.hadoop.hbase.*;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
 import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Scan;
+import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
 import org.apache.hadoop.hbase.mapreduce.TableMapper;
 import org.apache.hadoop.hbase.mapreduce.TableReducer;
-import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
-import org.apache.hadoop.hbase.client.Result;
-import org.apache.hadoop.hbase.KeyValue;
-import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.hbase.mapreduce.TableSplit;
-import org.apache.hadoop.hbase.TableName;
-
-// Hadoop classes
-import org.apache.hadoop.util.ToolRunner;
-import org.apache.hadoop.conf.Configured;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.util.Tool;
+import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
-import org.apache.log4j.Logger;
+import org.apache.hadoop.util.Tool;
+import org.apache.hadoop.util.ToolRunner;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Vector;
+
+// HBase classes
+// Hadoop classes
 
 public class Join extends Configured implements Tool {
 
@@ -46,17 +40,18 @@ public class Join extends Configured implements Tool {
 
 //=================================================================== Main
         /*
-            Explanation: Assume we want to do the cartesian product of tuples stored in two HBase tables (inputTable1 and inputTable2).
+            Explanation: Assume we want to do the join of tuples stored in two HBase tables (inputTable1 and inputTable2).
 
-            First, the main method checks the call parameters. There must be 4:
+            First, the main method checks the call parameters. There must be 5:
             1.- First (external) HBase input table where to read data from (it must have been created beforehand, as we will see later)
 			2.- Second (internal) HBase input table where to read data from (it must have been created beforehand, as we will see later)
-            4.- The HBase output table (it will be created, as we will see later)
-            5.- A random value
+            3.- The HBase output table (it will be created, as we will see later)
+            4.- The family:attribute pair for the external table to be joined
+            5.- The family:attribute pair for the internal table to be joined
 
             Assume a call like this:
 
-            yarn jar myJarFile.jar Join Username_InputTable1 Username_InputTable2 Username_OutputTable 10
+            yarn jar myJarFile.jar Join Username_InputTable1 Username_InputTable2 Username_OutputTable f1:a1 f2:a2
 
             Assume now the following HBase tables:
 
@@ -65,8 +60,11 @@ public class Join extends Configured implements Tool {
 				'key2', 'BBB'
 
 			- The Username_InputTable2 HBase table containing the following data:
-				'key3', 'CCC'
+				'key3', 'AAA'
 				'key4', 'DDD'
+
+			- The result will be:
+			    'key1_key3', 'AAA'
 
             As we will see later in the map and reduce methods, what we want to do is to join all tuples from Username_InputTable1 with all the tuples from Username_InputTable2 (but those from the same table must not be joined).
             Next, the main calls the checkIOTables method, which connects with HBase and handles it.
@@ -177,10 +175,12 @@ public class Join extends Configured implements Tool {
         job.getConfiguration().setStrings("Internal", inputTable2);
         String[] externalArg = args[3].split(":");
         String[] internalArg = args[4].split(":");
+        // Set the parameters passed as configuration strings for later use
         job.getConfiguration().setStrings(EXTERNAL_FAMILY, externalArg[0]);
         job.getConfiguration().setStrings(EXTERNAL_COLUMN, externalArg[1]);
         job.getConfiguration().setStrings(INTERNAL_FAMILY, internalArg[0]);
         job.getConfiguration().setStrings(INTERNAL_COLUMN, internalArg[1]);
+        // If we're going to set it to 10 every time, might as well do it here
         job.getConfiguration().setInt("Hash", 10);
         System.out.println("Hash = " + 10);
 
@@ -269,8 +269,6 @@ public class Join extends Configured implements Tool {
     //================================================================== Reducer
     public static class Reducer extends TableReducer<Text, Text, Text> {
 
-        private Logger logger = Logger.getLogger(Reducer.class);
-
           /* The reduce is automatically called by the MapReduce framework after the Merge Sort step.
           It receives a key, a list of values for that key, and a context object where to write the resulting key-value pairs. */
 
@@ -304,7 +302,7 @@ public class Join extends Configured implements Tool {
                         // we extract the information from the tuple as we packed it in the mapper
                         iTuple = iTableTuple.split("#")[1];
                         iAttributes = iTuple.split(";");
-                        if (iTableTuple.startsWith(internal[0]) && checkJoin(
+                        if (iTableTuple.startsWith(internal[0]) && checkJoin( // Literally a cartesian product with this check
                                 context.getConfiguration().getStrings(EXTERNAL_COLUMN)[0],
                                 context.getConfiguration().getStrings(EXTERNAL_FAMILY)[0],
                                 context.getConfiguration().getStrings(INTERNAL_COLUMN)[0],
@@ -334,18 +332,21 @@ public class Join extends Configured implements Tool {
         }
 
         private boolean checkJoin(String externalColumn, String externalFamily, String internalColumn, String internalFamily, String[] eAttributes, String[] iAttributes) {
+            // Ignore the key for both internal and external, we don't need it for this
             String[] colsValsE = eAttributes[1].split(":");
             String[] colsValsI = iAttributes[1].split(":");
+            // Search for the specified family:column in external
             for (int i = 0; i < colsValsE.length; i += 3) {
                 if (colsValsE[i].equals(externalFamily) && colsValsE[i + 1].equals(externalColumn)) {
+                    // Search for the specified family:column in internal
                     for (int j = 0; j < colsValsI.length; j += 3) {
                         if (colsValsI[j].equals(internalFamily) && colsValsI[j + 1].equals(internalColumn)) {
-                            return colsValsE[i + 2].equals(colsValsI[j + 2]);
+                            return colsValsE[i + 2].equals(colsValsI[j + 2]); // If the values are equal, they join.
                         }
                     }
                 }
             }
-            return false;
+            return false; // If no matches are found, it's not a join.
         }
     }
 }
