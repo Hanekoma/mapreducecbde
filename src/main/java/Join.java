@@ -1,5 +1,7 @@
 // Standard classes
+
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Vector;
 import java.util.ArrayList;
 
@@ -8,7 +10,6 @@ import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.client.HBaseAdmin;
-import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
@@ -26,17 +27,21 @@ import org.apache.hadoop.util.ToolRunner;
 import org.apache.hadoop.conf.Configured;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.util.Tool;
-import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
-import org.apache.hadoop.mapreduce.Reducer.Context;
+import org.apache.log4j.Logger;
 
-public class CartesianProduct extends Configured implements Tool {
+public class Join extends Configured implements Tool {
 
     // These are three global variables, which coincide with the three parameters in the call
     public static String inputTable1;
     public static String inputTable2;
     private static String outputTable;
+
+    private static final String EXTERNAL_COLUMN = "columnatt";
+    private static final String EXTERNAL_FAMILY = "familyatt";
+    private static final String INTERNAL_COLUMN = "columnattinternal";
+    private static final String INTERNAL_FAMILY = "familyinternal";
 
 
 //=================================================================== Main
@@ -51,7 +56,7 @@ public class CartesianProduct extends Configured implements Tool {
 
             Assume a call like this:
 
-            yarn jar myJarFile.jar CartesianProduct Username_InputTable1 Username_InputTable2 Username_OutputTable 10
+            yarn jar myJarFile.jar Join Username_InputTable1 Username_InputTable2 Username_OutputTable 10
 
             Assume now the following HBase tables:
 
@@ -69,8 +74,8 @@ public class CartesianProduct extends Configured implements Tool {
        */
 
     public static void main(String[] args) throws Exception {
-        if (args.length<4) {
-            System.err.println("Parameters missing: 'inputTableEXT inputTableINT outputTable hashValue'");
+        if (args.length < 5) {
+            System.err.println("Parameters missing: 'inputTableEXT inputTableINT outputTable family:extattribute family:intattribute'");
             System.exit(1);
         }
         inputTable1 = args[0];
@@ -78,10 +83,9 @@ public class CartesianProduct extends Configured implements Tool {
         outputTable = args[2];
 
 
-
         int tablesRight = checkIOTables(args);
-        if (tablesRight==0) {
-            int ret = ToolRunner.run(new CartesianProduct(), args);
+        if (tablesRight == 0) {
+            int ret = ToolRunner.run(new Join(), args);
             System.exit(ret);
         } else {
             System.exit(tablesRight);
@@ -93,7 +97,7 @@ public class CartesianProduct extends Configured implements Tool {
 
     // Explanation: Handles HBase and its relationship with the MapReduce task
 
-    private static int checkIOTables(String [] args) throws Exception {
+    private static int checkIOTables(String[] args) throws Exception {
         // Obtain HBase's configuration
         Configuration config = HBaseConfiguration.create();
         // Create an HBase administrator
@@ -140,13 +144,15 @@ public class CartesianProduct extends Configured implements Tool {
         HTableDescriptor htdOutput = new HTableDescriptor(outputTable.getBytes());
 
         // We copy the structure of the input tables in the output one by adding the input columns to the new table
-        for(byte[] key: htdInput1.getFamiliesKeys()) {
-            System.out.println("family-t1 = "+ new String(key));
+        for (byte[] key : htdInput1.getFamiliesKeys()) {
+            System.out.println("family-t1 = " + new String(key));
             htdOutput.addFamily(new HColumnDescriptor(key));
         }
-        for(byte[] key: htdInput2.getFamiliesKeys()) {
-            System.out.println("family-t2 = "+ new String(key));
-            htdOutput.addFamily(new HColumnDescriptor(key));
+        for (byte[] key : htdInput2.getFamiliesKeys()) {
+            System.out.println("family-t2 = " + new String(key));
+            if (!htdOutput.hasFamily(key)) { // avoid duplicates
+                htdOutput.addFamily(new HColumnDescriptor(key));
+            }
         }
 
         //Create the new output table based on the descriptor we have been configuring
@@ -157,39 +163,43 @@ public class CartesianProduct extends Configured implements Tool {
 
     //============================================================== Job config
     //Create a new job to execute. This is called from the main and starts the MapReduce job
-    public int run(String [] args) throws Exception {
+    public int run(String[] args) throws Exception {
 
         //Create a new MapReduce configuration object.
         Job job = new Job(HBaseConfiguration.create());
         //Set the MapReduce class
-        job.setJarByClass(CartesianProduct.class);
+        job.setJarByClass(Join.class);
         //Set the job name
-        job.setJobName("CartesianProduct");
+        job.setJobName("Join");
         // To pass parameters to the mapper and reducer we must use the setStrings of the Configuration object
         // We pass the names of two input tables as External and Internal tables of the Cartesian product, and a hash random value.
         job.getConfiguration().setStrings("External", inputTable1);
         job.getConfiguration().setStrings("Internal", inputTable2);
-        job.getConfiguration().setInt("Hash", Integer.parseInt(args[3]));
-        System.out.println("Hash = " + args[3]);
+        String[] externalArg = args[3].split(":");
+        String[] internalArg = args[4].split(":");
+        job.getConfiguration().setStrings(EXTERNAL_FAMILY, externalArg[0]);
+        job.getConfiguration().setStrings(EXTERNAL_COLUMN, externalArg[1]);
+        job.getConfiguration().setStrings(INTERNAL_FAMILY, internalArg[0]);
+        job.getConfiguration().setStrings(INTERNAL_COLUMN, internalArg[1]);
+        job.getConfiguration().setInt("Hash", 10);
+        System.out.println("Hash = " + 10);
 
          /* Set the Map and Reduce function:
             These are special mapper and reducers, which are prepared to read and store data on HBase tables
 		 */
 
 
-
-
         // To initialize the mapper, we need to provide two Scan objects (ArrayList of two Scan objects) for two input tables, as follows.
         ArrayList<Scan> scans = new ArrayList<>();
 
         Scan scan1 = new Scan();
-        System.out.println("inputTable1: "+inputTable1);
+        System.out.println("inputTable1: " + inputTable1);
 
         scan1.setAttribute("scan.attributes.table.name", Bytes.toBytes(inputTable1));
         scans.add(scan1);
 
         Scan scan2 = new Scan();
-        System.err.println("inputTable2: "+inputTable2);
+        System.err.println("inputTable2: " + inputTable2);
         scan2.setAttribute("scan.attributes.table.name", Bytes.toBytes(inputTable2));
 
         scans.add(scan2);
@@ -223,33 +233,33 @@ public class CartesianProduct extends Configured implements Tool {
             String[] internal = context.getConfiguration().getStrings("Internal", "Default");
 
             // From the context object we obtain the input TableSplit this row belongs to
-            TableSplit currentSplit = (TableSplit)context.getInputSplit();
+            TableSplit currentSplit = (TableSplit) context.getInputSplit();
 
 		   /*
-			  From the TableSplit object, we can further extract the name of the table that the split belongs to.
+              From the TableSplit object, we can further extract the name of the table that the split belongs to.
 			  We use the extracted table name to distinguish between external and internal tables as explained below.
 		   */
             TableName tableNameB = currentSplit.getTable();
             String tableName = tableNameB.getQualifierAsString();
 
             // We create a string as follows for each key: tableName#key;family:attributeValue
-            String tuple = tableName+"#"+new String(rowMetadata.get(), "US-ASCII");
+            String tuple = tableName + "#" + new String(rowMetadata.get(), "US-ASCII");
 
             KeyValue[] attributes = values.raw();
-            for (i=0;i<attributes.length;i++) {
-                tuple = tuple+";"+new String(attributes[i].getFamily())+":"+new String(attributes[i].getQualifier())+":"+new String(attributes[i].getValue());
+            for (i = 0; i < attributes.length; i++) {
+                tuple = tuple + ";" + new String(attributes[i].getFamily()) + ":" + new String(attributes[i].getQualifier()) + ":" + new String(attributes[i].getValue());
             }
 
             //Is this key external (e.g., from the external table)?
             if (tableName.equalsIgnoreCase(external[0])) {
                 //This writes a key-value pair to the context object
                 //If it is external, it gets as key a hash value and it is written only once in the context object
-                context.write(new Text(Integer.toString(Double.valueOf(Math.random()*hash).intValue())), new Text(tuple));
+                context.write(new Text(Integer.toString(Double.valueOf(Math.random() * hash).intValue())), new Text(tuple));
             }
             //Is this key internal (e.g., from the internal table)?
             //If it is internal, it is written to the context object many times, each time having as key one of the potential hash values
             if (tableName.equalsIgnoreCase(internal[0])) {
-                for(i=0;i<hash;i++) {
+                for (i = 0; i < hash; i++) {
                     context.write(new Text(Integer.toString(i)), new Text(tuple));
                 }
             }
@@ -259,17 +269,19 @@ public class CartesianProduct extends Configured implements Tool {
     //================================================================== Reducer
     public static class Reducer extends TableReducer<Text, Text, Text> {
 
+        private Logger logger = Logger.getLogger(Reducer.class);
+
           /* The reduce is automatically called by the MapReduce framework after the Merge Sort step.
           It receives a key, a list of values for that key, and a context object where to write the resulting key-value pairs. */
 
         public void reduce(Text key, Iterable<Text> inputList, Context context) throws IOException, InterruptedException {
-            int i,j,k;
+            int i, j, k;
             Put put;
             String eTableTuple, iTableTuple;
             String eTuple, iTuple;
             String outputKey;
-            String[] external = context.getConfiguration().getStrings("External","Default");
-            String[] internal = context.getConfiguration().getStrings("Internal","Default");
+            String[] external = context.getConfiguration().getStrings("External", "Default");
+            String[] internal = context.getConfiguration().getStrings("Internal", "Default");
             String[] eAttributes, iAttributes;
             String[] attribute_value;
 
@@ -281,29 +293,35 @@ public class CartesianProduct extends Configured implements Tool {
 
             //In this for, each internal tuple is joined with each external tuple
             //Since the result must be stored in a HBase table, we configure a new Put, fill it with the joined data and write it in the context object
-            for (i=0;i<tuples.size();i++) {
+            for (i = 0; i < tuples.size(); i++) {
                 eTableTuple = tuples.get(i);
                 // we extract the information from the tuple as we packed it in the mapper
-                eTuple=eTableTuple.split("#")[1];
-                eAttributes=eTuple.split(";");
+                eTuple = eTableTuple.split("#")[1];
+                eAttributes = eTuple.split(";");
                 if (eTableTuple.startsWith(external[0])) {
-                    for (j=0;j<tuples.size();j++) {
+                    for (j = 0; j < tuples.size(); j++) {
                         iTableTuple = tuples.get(j);
                         // we extract the information from the tuple as we packed it in the mapper
-                        iTuple=iTableTuple.split("#")[1];
-                        iAttributes=iTuple.split(";");
-                        if (iTableTuple.startsWith(internal[0]) && checkJoin(eAttributes, iAttributes)) {
+                        iTuple = iTableTuple.split("#")[1];
+                        iAttributes = iTuple.split(";");
+                        if (iTableTuple.startsWith(internal[0]) && checkJoin(
+                                context.getConfiguration().getStrings(EXTERNAL_COLUMN)[0],
+                                context.getConfiguration().getStrings(EXTERNAL_FAMILY)[0],
+                                context.getConfiguration().getStrings(INTERNAL_COLUMN)[0],
+                                context.getConfiguration().getStrings(INTERNAL_FAMILY)[0],
+                                eAttributes, iAttributes)
+                                ) {
                             // Create a key for the output
-                            outputKey = eAttributes[0]+"_"+iAttributes[0];
+                            outputKey = eAttributes[0] + "_" + iAttributes[0];
                             // Create a tuple for the output table
                             put = new Put(outputKey.getBytes());
                             //Set the values for the columns of the external table
-                            for (k=1;k<eAttributes.length;k++) {
+                            for (k = 1; k < eAttributes.length; k++) {
                                 attribute_value = eAttributes[k].split(":");
                                 put.addColumn(attribute_value[0].getBytes(), attribute_value[1].getBytes(), attribute_value[2].getBytes());
                             }
                             //Set the values for the columns of the internal table
-                            for (k=1;k<iAttributes.length;k++) {
+                            for (k = 1; k < iAttributes.length; k++) {
                                 attribute_value = iAttributes[k].split(":");
                                 put.addColumn(attribute_value[0].getBytes(), attribute_value[1].getBytes(), attribute_value[2].getBytes());
                             }
@@ -315,14 +333,14 @@ public class CartesianProduct extends Configured implements Tool {
             }
         }
 
-        private boolean checkJoin(String[] eAttributes, String[] iAttributes) {
+        private boolean checkJoin(String externalColumn, String externalFamily, String internalColumn, String internalFamily, String[] eAttributes, String[] iAttributes) {
             String[] colsValsE = eAttributes[1].split(":");
             String[] colsValsI = iAttributes[1].split(":");
-            for (int i = 0; i < colsValsE.length; i += 2) {
-                if (colsValsE[i].equals("PEPEE")) {
-                    for (int j = 0; j < colsValsI.length; ++j) {
-                        if (colsValsI[j].equals("PEPEI")) {
-                            return colsValsE[i+1].equals(colsValsI[j+1]);
+            for (int i = 0; i < colsValsE.length; i += 3) {
+                if (colsValsE[i].equals(externalFamily) && colsValsE[i + 1].equals(externalColumn)) {
+                    for (int j = 0; j < colsValsI.length; j += 3) {
+                        if (colsValsI[j].equals(internalFamily) && colsValsI[j + 1].equals(internalColumn)) {
+                            return colsValsE[i + 2].equals(colsValsI[j + 2]);
                         }
                     }
                 }
