@@ -246,21 +246,35 @@ public class Join extends Configured implements Tool {
             String tuple = tableName + "#" + new String(rowMetadata.get(), "US-ASCII");
 
             KeyValue[] attributes = values.raw();
+
+            // Join optimization: check if it had the asked family and attribute. If it didn't, we don't need to send to reducer
+            String externalColumn = context.getConfiguration().getStrings(EXTERNAL_COLUMN)[0];
+            String externalFamily = context.getConfiguration().getStrings(EXTERNAL_FAMILY)[0];
+            String internalColumn = context.getConfiguration().getStrings(INTERNAL_COLUMN)[0];
+            String internalFamily = context.getConfiguration().getStrings(INTERNAL_FAMILY)[0];
+            boolean coincidence = false;
             for (i = 0; i < attributes.length; i++) {
+                String family = new String(attributes[i].getFamily());
+                String column = new String(attributes[i].getQualifier());
+                if (externalColumn.equals(column) && externalFamily.equals(family) || internalColumn.equals(column) && internalFamily.equals(family)) {
+                    coincidence = true;
+                }
                 tuple = tuple + ";" + new String(attributes[i].getFamily()) + ":" + new String(attributes[i].getQualifier()) + ":" + new String(attributes[i].getValue());
             }
 
-            //Is this key external (e.g., from the external table)?
-            if (tableName.equalsIgnoreCase(external[0])) {
-                //This writes a key-value pair to the context object
-                //If it is external, it gets as key a hash value and it is written only once in the context object
-                context.write(new Text(Integer.toString(Double.valueOf(Math.random() * hash).intValue())), new Text(tuple));
-            }
-            //Is this key internal (e.g., from the internal table)?
-            //If it is internal, it is written to the context object many times, each time having as key one of the potential hash values
-            if (tableName.equalsIgnoreCase(internal[0])) {
-                for (i = 0; i < hash; i++) {
-                    context.write(new Text(Integer.toString(i)), new Text(tuple));
+            if (coincidence) { // Again, no need to send to reducer if the family:attribute did not exist
+                //Is this key external (e.g., from the external table)?
+                if (tableName.equalsIgnoreCase(external[0])) {
+                    //This writes a key-value pair to the context object
+                    //If it is external, it gets as key a hash value and it is written only once in the context object
+                    context.write(new Text(Integer.toString(Double.valueOf(Math.random() * hash).intValue())), new Text(tuple));
+                }
+                //Is this key internal (e.g., from the internal table)?
+                //If it is internal, it is written to the context object many times, each time having as key one of the potential hash values
+                if (tableName.equalsIgnoreCase(internal[0])) {
+                    for (i = 0; i < hash; i++) {
+                        context.write(new Text(Integer.toString(i)), new Text(tuple));
+                    }
                 }
             }
         }
