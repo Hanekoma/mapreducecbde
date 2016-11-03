@@ -238,6 +238,7 @@ public class CartesianProduct extends Configured implements Tool {
             KeyValue[] attributes = values.raw();
             for (i=0;i<attributes.length;i++) {
                 tuple = tuple+";"+new String(attributes[i].getFamily())+":"+new String(attributes[i].getQualifier())+":"+new String(attributes[i].getValue());
+                System.err.println(tuple);
             }
 
             //Is this key external (e.g., from the external table)?
