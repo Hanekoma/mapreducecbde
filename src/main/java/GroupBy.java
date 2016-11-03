@@ -31,7 +31,7 @@ public class GroupBy extends Configured implements Tool {
 
     public static void main(String[] args) throws Exception {
         if (args.length < 4) {
-            System.err.println("Parameters missing: 'inputTable outputTable [family:]attribute [family:]attribute'");
+            System.err.println("Parameters missing: 'inputTable outputTable [family:]attribute attribute(same family as before)'");
             System.exit(1);
         }
         inputTable = args[0];
